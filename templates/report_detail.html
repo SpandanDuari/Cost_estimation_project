@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Report #{{ report.id }} | Cost Estimation</title>
+    <style>
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 24px;
+        }
+        .container {
+            max-width: 820px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 22px;
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+        }
+        h2 {
+            margin-top: 0;
+            color: #0f172a;
+        }
+        .meta {
+            color: #475569;
+            font-size: 14px;
+            margin-bottom: 14px;
+        }
+        .row {
+            margin: 8px 0;
+            color: #1e293b;
+        }
+        .row b {
+            display: inline-block;
+            min-width: 160px;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+        .btn {
+            display: inline-block;
+            text-align: center;
+            text-decoration: none;
+            padding: 9px 12px;
+            border-radius: 8px;
+            color: white;
+            background: #2563eb;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background: #1e40af;
+        }
+        .btn.pdf {
+            background: #0f766e;
+        }
+        .btn.pdf:hover {
+            background: #115e59;
+        }
+        .btn.delete {
+            background: #dc2626;
+        }
+        .btn.delete:hover {
+            background: #b91c1c;
+        }
+        .btn.back {
+            background: #475569;
+        }
+        .btn.back:hover {
+            background: #334155;
+        }
+        .admin-note {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h2>Report #{{ report.id }}</h2>
+
+        {% if is_admin and not is_owner %}
+        <div class="admin-note">Admin view: This report belongs to user <b>{{ report.username }}</b>.</div>
+        {% endif %}
+
+        <div class="meta">Opened by: <b>{{ user }}</b></div>
+
+        <div class="row"><b>Owner</b> {{ report.username }}</div>
+        <div class="row"><b>Generated On</b> {{ report.created_at }}</div>
+        <div class="row"><b>Effort</b> {{ report.effort }} Person/Months</div>
+        <div class="row"><b>Development Time</b> {{ report.time }} Months</div>
+        <div class="row"><b>Total Cost</b> ₹ {{ report.cost }}</div>
+
+        <div class="actions">
+            <a class="btn" href="{{ url_for('download_page') }}">Open in Downloads</a>
+            <form method="POST" action="{{ url_for('delete_report', report_id=report.id, source='dashboard') }}" onsubmit="return confirm('Delete this report permanently?');">
+                <button type="submit" class="btn delete">Delete Report</button>
+            </form>
+            <a class="btn back" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

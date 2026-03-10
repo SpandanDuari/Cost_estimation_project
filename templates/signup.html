@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Create Account | Cost Estimation Portal</title>
+    <style>
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(135deg, #f0fdfa, #ecfeff);
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+        }
+        .card {
+            width: min(460px, 92vw);
+            background: #ffffff;
+            border-radius: 14px;
+            box-shadow: 0 12px 30px rgba(30, 41, 59, 0.15);
+            padding: 26px;
+        }
+        h1 {
+            margin: 0;
+            text-align: center;
+            color: #0f172a;
+            font-size: 24px;
+        }
+        .subtitle {
+            margin: 8px 0 18px;
+            text-align: center;
+            color: #475569;
+            font-size: 14px;
+        }
+        label {
+            font-weight: 600;
+            display: block;
+            margin-top: 10px;
+            color: #1e293b;
+        }
+        input,
+        button,
+        .link-btn {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            font-size: 15px;
+            box-sizing: border-box;
+            border-radius: 8px;
+        }
+        input {
+            border: 1px solid #cbd5e1;
+            outline: none;
+        }
+        input:focus {
+            border-color: #0f766e;
+            box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+        }
+        button {
+            background: #0f766e;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover {
+            background: #0f5f58;
+        }
+        .link-btn {
+            display: inline-block;
+            text-align: center;
+            text-decoration: none;
+            background: #2563eb;
+            color: #ffffff;
+            font-weight: 600;
+        }
+        .link-btn:hover {
+            background: #1e40af;
+        }
+        .error {
+            background: #fef2f2;
+            color: #b91c1c;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .message {
+            background: #ecfeff;
+            color: #155e75;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>Create New Account</h1>
+    <p class="subtitle">Sign up to start generating project reports</p>
+
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if message %}
+    <div class="message">{{ message }}</div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('signup') }}" autocomplete="on">
+        <label>Username</label>
+        <input type="text" name="username" autocomplete="username" required>
+
+        <label>Password</label>
+        <input type="password" name="password" autocomplete="new-password" required>
+
+        <button type="submit">Create Account</button>
+    </form>
+
+    <a class="link-btn" href="{{ url_for('auth') }}">Back to Login</a>
+</div>
+
+</body>
+</html>

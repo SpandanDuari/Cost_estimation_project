@@ -2,88 +2,351 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Automated Cost Estimation</title>
+    <title>Dashboard | Cost Estimation</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background: #f2f4f8;
-            padding: 40px;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 24px;
         }
-        .box {
+        .container {
+            max-width: 1040px;
+            margin: 0 auto;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 14px 18px;
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+            margin-bottom: 18px;
+        }
+        .brand {
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .top-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 18px;
+        }
+        .panel {
             background: white;
             padding: 25px;
-            width: 420px;
-            margin: auto;
-            border-radius: 10px;
-            box-shadow: 0 0 10px #ccc;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
         }
-        h2 {
-            text-align: center;
+        h2, h3 {
+            margin-top: 0;
+            color: #0f172a;
         }
         label {
-            font-weight: bold;
+            font-weight: 600;
+            color: #1e293b;
+            display: block;
+            margin-top: 10px;
         }
         input, button {
             width: 100%;
             padding: 10px;
             margin: 8px 0;
-            font-size: 16px;
+            font-size: 15px;
+            box-sizing: border-box;
+            border-radius: 8px;
+        }
+        input {
+            border: 1px solid #cbd5e1;
+            outline: none;
+        }
+        input:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
         }
         button {
             background: #2563eb;
             color: white;
             border: none;
             cursor: pointer;
-            border-radius: 5px;
+            font-weight: 600;
         }
         button:hover {
             background: #1e40af;
         }
         .result {
-            background: #e6fffa;
-            padding: 10px;
+            background: #ecfeff;
+            padding: 12px;
             margin-top: 15px;
-            border-radius: 5px;
+            border-radius: 8px;
         }
         .error {
-            background: #ffe6e6;
-            color: red;
+            background: #fef2f2;
+            color: #b91c1c;
             padding: 10px;
             margin-top: 10px;
-            border-radius: 5px;
+            border-radius: 8px;
+        }
+        .flash {
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .flash.success {
+            background: #ecfdf5;
+            color: #166534;
+            border: 1px solid #86efac;
+        }
+        .flash.error {
+            background: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fca5a5;
         }
         .hint {
             font-size: 12px;
-            color: #555;
+            color: #64748b;
+        }
+        .link-btn,
+        .logout-link {
+            display: inline-block;
+            color: white;
+            text-decoration: none;
+            text-align: center;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .link-btn {
+            background: #0f766e;
+        }
+        .link-btn:hover {
+            background: #115e59;
+        }
+        .logout-link {
+            background: #dc2626;
+        }
+        .logout-link:hover {
+            background: #b91c1c;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        th, td {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 10px 8px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            color: #334155;
+            background: #f8fafc;
+        }
+        .small-btn {
+            background: #2563eb;
+            color: #fff;
+            text-decoration: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: inline-block;
+            border: none;
+            cursor: pointer;
+        }
+        .small-btn:hover {
+            background: #1e40af;
+        }
+        .small-btn.pdf {
+            background: #0f766e;
+        }
+        .small-btn.pdf:hover {
+            background: #115e59;
+        }
+        .small-btn.delete {
+            background: #dc2626;
+        }
+        .small-btn.delete:hover {
+            background: #b91c1c;
+        }
+        .actions-inline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+        .actions-inline form {
+            margin: 0;
+        }
+        .clickable-row {
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+        .clickable-row:hover {
+            background: #f8fafc;
+        }
+        .admin-tag {
+            display: inline-block;
+            margin-left: 6px;
+            background: #fef3c7;
+            color: #92400e;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 999px;
+            font-weight: 700;
+        }
+        .empty {
+            color: #64748b;
+            background: #f8fafc;
+            border: 1px dashed #cbd5e1;
+            border-radius: 8px;
+            padding: 14px;
+            margin-top: 10px;
+        }
+        @media (max-width: 900px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
 
-<div class="box">
-    <h2>Software Cost Estimation</h2>
+<div class="container">
+    <div class="topbar">
+        <div>
+            <div class="brand">Software Cost Estimation Dashboard</div>
+            <div style="font-size: 14px; color: #475569; margin-top: 4px;">Logged in as <b>{{ user }}</b></div>
+        </div>
+        <div class="top-actions">
+            <a class="link-btn" href="{{ url_for('download_page') }}">Download Center</a>
+            <a class="logout-link" href="{{ url_for('logout') }}">Logout</a>
+        </div>
+    </div>
 
-    <form method="POST">
-        <label>Project Size (Lines of Code - LOC)</label>
-        <input type="number" name="loc" placeholder="Eg: 10000" required>
-        <div class="hint">Enter total number of lines of code</div>
+    <div class="layout">
+        <div class="panel">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+            {% endwith %}
 
-        <label>Cost per Developer (₹ per month)</label>
-        <input type="number" name="cost" placeholder="Eg: 20000" required>
-        <div class="hint">Monthly cost of one developer</div>
+            <h2>Generate New Estimate</h2>
+            <form method="POST">
+                <label>Project Size (Lines of Code - LOC)</label>
+                <input type="number" name="loc" placeholder="Eg: 10000" required>
+                <div class="hint">Enter total number of lines of code</div>
 
-        <button type="submit">Estimate Cost</button>
-    </form>
+                <label>Cost per Developer (₹ per month)</label>
+                <input type="number" name="cost" placeholder="Eg: 20000" required>
+                <div class="hint">Monthly cost of one developer</div>
 
-    {% if error %}
-    <div class="error">{{ error }}</div>
-    {% endif %}
+                <button type="submit">Estimate Cost</button>
+            </form>
 
-    {% if result %}
-    <div class="result">
-        <p><b>Effort:</b> {{ result.effort }} Person/Months</p>
-        <p><b>Development Time:</b> {{ result.time }} Months</p>
-        <p><b>Total Cost:</b> ₹ {{ result.cost }}</p>
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+
+            {% if result %}
+            <div class="result">
+                <p><b>Latest Report ID:</b> #{{ result.id }}</p>
+                <p><b>Generated On:</b> {{ result.created_at }}</p>
+                <p><b>Effort:</b> {{ result.effort }} Person/Months</p>
+                <p><b>Development Time:</b> {{ result.time }} Months</p>
+                <p><b>Total Cost:</b> ₹ {{ result.cost }}</p>
+                <div class="actions-inline">
+                    <a class="small-btn" href="{{ url_for('download_page') }}">Open in Downloads</a>
+                    <form method="POST" action="{{ url_for('delete_report', report_id=result.id, source='dashboard') }}" onsubmit="return confirm('Delete this report permanently?');">
+                        <button type="submit" class="small-btn delete">Delete</button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="panel">
+            <h3>Past Generated Reports</h3>
+            {% if report_history %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Report ID</th>
+                        {% if is_admin %}
+                        <th>Owner</th>
+                        {% endif %}
+                        <th>Generated On</th>
+                        <th>Total Cost</th>
+                        <th>Open</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for report in report_history %}
+                    <tr class="clickable-row" onclick="window.location='{{ url_for('report_detail', report_id=report.id) }}'">
+                        <td>#{{ report.id }}</td>
+                        {% if is_admin %}
+                        <td>{{ report.username }}</td>
+                        {% endif %}
+                        <td>{{ report.created_at }}</td>
+                        <td>₹ {{ report.cost }}</td>
+                        <td>Click to open</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">No reports generated yet. Create your first estimate from the form.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if is_admin %}
+    <div class="panel" style="margin-top: 18px;">
+        <h3>Admin User Management <span class="admin-tag">ADMIN</span></h3>
+        {% if users_list %}
+        <table>
+            <thead>
+                <tr>
+                    <th>User ID</th>
+                    <th>Username</th>
+                    <th>Role</th>
+                    <th>Created At</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in users_list %}
+                <tr>
+                    <td>#{{ account.id }}</td>
+                    <td>{{ account.username }}</td>
+                    <td>{% if account.is_admin %}Admin{% else %}User{% endif %}</td>
+                    <td>{{ account.created_at }}</td>
+                    <td>
+                        {% if account.is_admin %}
+                            Protected
+                        {% else %}
+                        <form method="POST" action="{{ url_for('admin_delete_user', user_id=account.id) }}" onsubmit="return confirm('Delete this account and all associated reports?');">
+                            <button type="submit" class="small-btn delete">Delete Account</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
     </div>
     {% endif %}
 </div>

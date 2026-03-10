@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Download Center</title>
+    <style>
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 24px;
+        }
+        .box {
+            background: white;
+            padding: 25px;
+            max-width: 900px;
+            margin: auto;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+        }
+        h2 {
+            margin: 0;
+            color: #0f172a;
+        }
+        .meta {
+            margin-top: 8px;
+            font-size: 14px;
+            color: #334155;
+        }
+        .btn {
+            display: inline-block;
+            text-align: center;
+            text-decoration: none;
+            padding: 8px 12px;
+            margin-top: 12px;
+            border-radius: 8px;
+            color: white;
+            background: #2563eb;
+            box-sizing: border-box;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .btn:hover {
+            background: #1e40af;
+        }
+        .btn.pdf {
+            background: #0f766e;
+        }
+        .btn.pdf:hover {
+            background: #115e59;
+        }
+        .btn.delete {
+            background: #dc2626;
+            border: none;
+            cursor: pointer;
+            margin-top: 0;
+        }
+        .btn.delete:hover {
+            background: #b91c1c;
+        }
+        .back {
+            background: #475569;
+        }
+        .back:hover {
+            background: #334155;
+        }
+        .empty {
+            background: #f8fafc;
+            color: #475569;
+            padding: 14px;
+            border-radius: 8px;
+            margin-top: 14px;
+            border: 1px dashed #cbd5e1;
+        }
+        .flash {
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 12px;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .flash.success {
+            background: #ecfdf5;
+            color: #166534;
+            border: 1px solid #86efac;
+        }
+        .flash.error {
+            background: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fca5a5;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 14px;
+            font-size: 14px;
+        }
+        th, td {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 10px 8px;
+            text-align: left;
+        }
+        th {
+            background: #f8fafc;
+            color: #334155;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .row-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .row-actions form {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+<div class="box">
+    <h2>Download Center</h2>
+    <p class="meta">User: <b>{{ user }}</b></p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    {% if reports %}
+    <table>
+        <thead>
+            <tr>
+                <th>Report ID</th>
+                <th>Generated On</th>
+                <th>Effort</th>
+                <th>Time</th>
+                <th>Total Cost</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for report in reports %}
+            <tr>
+                <td>#{{ report.id }}</td>
+                <td>{{ report.created_at }}</td>
+                <td>{{ report.effort }}</td>
+                <td>{{ report.time }} months</td>
+                <td>₹ {{ report.cost }}</td>
+                <td>
+                    <div class="row-actions">
+                        <a class="btn" href="{{ url_for('download_report', report_id=report.id) }}">TXT</a>
+                        <a class="btn pdf" href="{{ url_for('download_report_pdf', report_id=report.id) }}">PDF</a>
+                        <form method="POST" action="{{ url_for('delete_report', report_id=report.id, source='download') }}" onsubmit="return confirm('Delete this report permanently?');">
+                            <button type="submit" class="btn delete">Delete</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No report found yet. Please calculate an estimate first from the dashboard.</div>
+    {% endif %}
+
+    <div class="actions">
+        <a class="btn back" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+    </div>
+</div>
+</body>
+</html>
