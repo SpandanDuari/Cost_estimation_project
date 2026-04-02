@@ -139,6 +139,7 @@
             <tr>
                 <th>Report ID</th>
                 <th>Generated On</th>
+                <th>Model</th>
                 <th>Effort</th>
                 <th>Time</th>
                 <th>Total Cost</th>
@@ -150,6 +151,7 @@
             <tr>
                 <td>#{{ report.id }}</td>
                 <td>{{ report.created_at }}</td>
+                <td>{{ report.model or "COCOMO_I" }}</td>
                 <td>{{ report.effort }}</td>
                 <td>{{ report.time }} months</td>
                 <td>₹ {{ report.cost }}</td>

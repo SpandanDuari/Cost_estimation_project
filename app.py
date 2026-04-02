@@ -1,5 +1,6 @@
 from datetime import datetime
 import io
+import math
 import os
 import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, session, Response, flash
@@ -13,6 +14,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "cost_estimation.db")
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
+
+COCOMO_I_COEFFICIENTS = {
+    "organic": {"a": 2.4, "b": 1.05},
+    "semi-detached": {"a": 3.0, "b": 1.12},
+    "embedded": {"a": 3.6, "b": 1.20},
+}
+COCOMO_II_A = 2.94
+COCOMO_II_B = 0.91
+MAX_INPUT_VALUE = 1_000_000_000
 
 
 def get_db_connection():
@@ -47,6 +57,14 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             created_at TEXT NOT NULL,
+            model TEXT NOT NULL DEFAULT 'COCOMO_I',
+            loc REAL,
+            cost_per_dev REAL,
+            cocomo_mode TEXT,
+            eaf REAL,
+            scale_factors_sum REAL,
+            productivity REAL,
+            avg_team_size REAL,
             effort REAL NOT NULL,
             time REAL NOT NULL,
             cost REAL NOT NULL,
@@ -54,6 +72,21 @@ def init_db():
         )
         """
     )
+
+    report_columns = [row["name"] for row in cursor.execute("PRAGMA table_info(reports)").fetchall()]
+    report_column_migrations = [
+        ("model", "TEXT NOT NULL DEFAULT 'COCOMO_I'"),
+        ("loc", "REAL"),
+        ("cost_per_dev", "REAL"),
+        ("cocomo_mode", "TEXT"),
+        ("eaf", "REAL"),
+        ("scale_factors_sum", "REAL"),
+        ("productivity", "REAL"),
+        ("avg_team_size", "REAL"),
+    ]
+    for column_name, column_definition in report_column_migrations:
+        if column_name not in report_columns:
+            cursor.execute(f"ALTER TABLE reports ADD COLUMN {column_name} {column_definition}")
 
     conn.commit()
     conn.close()
@@ -108,7 +141,8 @@ def get_reports_for_user(user_id):
     conn = get_db_connection()
     rows = conn.execute(
         """
-        SELECT id, user_id, created_at, effort, time, cost
+         SELECT id, user_id, created_at, model, loc, cost_per_dev, cocomo_mode,
+             eaf, scale_factors_sum, productivity, avg_team_size, effort, time, cost
         FROM reports
         WHERE user_id = ?
         ORDER BY id DESC
@@ -123,7 +157,8 @@ def get_report_for_user(user_id, report_id):
     conn = get_db_connection()
     row = conn.execute(
         """
-        SELECT id, user_id, created_at, effort, time, cost
+         SELECT id, user_id, created_at, model, loc, cost_per_dev, cocomo_mode,
+             eaf, scale_factors_sum, productivity, avg_team_size, effort, time, cost
         FROM reports
         WHERE user_id = ? AND id = ?
         """,
@@ -158,7 +193,9 @@ def get_report_by_id(report_id):
     conn = get_db_connection()
     row = conn.execute(
         """
-        SELECT r.id, r.user_id, r.created_at, r.effort, r.time, r.cost, u.username
+         SELECT r.id, r.user_id, r.created_at, r.model, r.loc, r.cost_per_dev, r.cocomo_mode,
+             r.eaf, r.scale_factors_sum, r.productivity, r.avg_team_size,
+             r.effort, r.time, r.cost, u.username
         FROM reports r
         JOIN users u ON r.user_id = u.id
         WHERE r.id = ?
@@ -173,7 +210,9 @@ def get_all_reports():
     conn = get_db_connection()
     rows = conn.execute(
         """
-        SELECT r.id, r.user_id, r.created_at, r.effort, r.time, r.cost, u.username
+         SELECT r.id, r.user_id, r.created_at, r.model, r.loc, r.cost_per_dev, r.cocomo_mode,
+             r.eaf, r.scale_factors_sum, r.productivity, r.avg_team_size,
+             r.effort, r.time, r.cost, u.username
         FROM reports r
         JOIN users u ON r.user_id = u.id
         ORDER BY r.id DESC
@@ -190,6 +229,210 @@ def delete_user_account(user_id):
     conn.commit()
     conn.close()
     return deleted_user
+
+
+def parse_positive_number(field_name, raw_value, min_value=0, max_value=MAX_INPUT_VALUE):
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must be a valid number.")
+
+    if value <= min_value:
+        raise ValueError(f"{field_name} must be greater than {min_value}.")
+    if value > max_value:
+        raise ValueError(f"{field_name} must be less than or equal to {max_value}.")
+    return value
+
+
+def parse_bounded_number(field_name, raw_value, min_value, max_value):
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must be a valid number.")
+
+    if value < min_value or value > max_value:
+        raise ValueError(f"{field_name} must be between {min_value} and {max_value}.")
+    return value
+
+
+def estimate_with_cocomo_i(loc, cost_per_dev, cocomo_mode):
+    coefficients = COCOMO_I_COEFFICIENTS.get(cocomo_mode)
+    if not coefficients:
+        raise ValueError("Invalid COCOMO I mode selected.")
+
+    kloc = loc / 1000
+    effort = coefficients["a"] * (kloc ** coefficients["b"])
+    development_time = 2.5 * (effort ** 0.38)
+    total_cost = effort * cost_per_dev
+    avg_team_size = effort / development_time if development_time > 0 else 0
+    productivity = loc / effort if effort > 0 else 0
+
+    return {
+        "effort": effort,
+        "time": development_time,
+        "cost": total_cost,
+        "avg_team_size": avg_team_size,
+        "productivity": productivity,
+        "cocomo_mode": cocomo_mode,
+        "eaf": None,
+        "scale_factors_sum": None,
+    }
+
+
+def estimate_with_cocomo_ii(loc, cost_per_dev, eaf, scale_factors):
+    sf_sum = sum(scale_factors.values())
+    exponent = COCOMO_II_B + 0.01 * sf_sum
+    kloc = loc / 1000
+
+    effort = COCOMO_II_A * eaf * (kloc ** exponent)
+    development_time = 3.67 * (effort ** (0.28 + 0.2 * (exponent - COCOMO_II_B)))
+    total_cost = effort * cost_per_dev
+    avg_team_size = effort / development_time if development_time > 0 else 0
+    productivity = loc / effort if effort > 0 else 0
+
+    return {
+        "effort": effort,
+        "time": development_time,
+        "cost": total_cost,
+        "avg_team_size": avg_team_size,
+        "productivity": productivity,
+        "cocomo_mode": None,
+        "eaf": eaf,
+        "scale_factors_sum": sf_sum,
+    }
+
+
+def build_ai_feature_vector(loc, cost_per_dev, model, eaf, scale_factors_sum):
+    return {
+        "loc": loc,
+        "cost_per_dev": cost_per_dev,
+        "model_indicator": 1.0 if model == "COCOMO_II" else 0.0,
+        "eaf": eaf,
+        "scale_factors_sum": scale_factors_sum,
+    }
+
+
+def calculate_ai_distance(source, target):
+    # Weighted normalized distance so LOC does not dominate all features
+    weights = {
+        "loc": 0.40,
+        "cost_per_dev": 0.25,
+        "model_indicator": 0.10,
+        "eaf": 0.10,
+        "scale_factors_sum": 0.15,
+    }
+    norms = {
+        "loc": max(source["loc"], target["loc"], 1.0),
+        "cost_per_dev": max(source["cost_per_dev"], target["cost_per_dev"], 1.0),
+        "model_indicator": 1.0,
+        "eaf": 10.0,
+        "scale_factors_sum": 30.0,
+    }
+
+    squared = 0.0
+    for key in weights:
+        delta = (source[key] - target[key]) / norms[key]
+        squared += weights[key] * (delta ** 2)
+    return math.sqrt(squared)
+
+
+def ai_predict_from_history(training_reports, input_vector):
+    enriched = []
+    for report in training_reports:
+        if report.get("loc") is None or report.get("cost_per_dev") is None:
+            continue
+
+        report_model = report.get("model") or "COCOMO_I"
+        report_vector = build_ai_feature_vector(
+            loc=float(report.get("loc") or 0),
+            cost_per_dev=float(report.get("cost_per_dev") or 0),
+            model=report_model,
+            eaf=float(report.get("eaf") or 1.0),
+            scale_factors_sum=float(report.get("scale_factors_sum") or 15.0),
+        )
+
+        distance = calculate_ai_distance(input_vector, report_vector)
+        enriched.append({
+            "distance": distance,
+            "effort": float(report.get("effort") or 0),
+            "time": float(report.get("time") or 0),
+            "cost": float(report.get("cost") or 0),
+        })
+
+    if not enriched:
+        return None
+
+    enriched.sort(key=lambda item: item["distance"])
+    neighbors = enriched[: min(5, len(enriched))]
+
+    weighted_effort = 0.0
+    weighted_time = 0.0
+    weighted_cost = 0.0
+    total_weight = 0.0
+    epsilon = 1e-6
+
+    for item in neighbors:
+        weight = 1.0 / (item["distance"] + epsilon)
+        weighted_effort += item["effort"] * weight
+        weighted_time += item["time"] * weight
+        weighted_cost += item["cost"] * weight
+        total_weight += weight
+
+    if total_weight <= 0:
+        return None
+
+    avg_distance = sum(item["distance"] for item in neighbors) / len(neighbors)
+    confidence = max(35.0, min(99.0, 100.0 - (avg_distance * 100.0)))
+
+    return {
+        "effort": weighted_effort / total_weight,
+        "time": weighted_time / total_weight,
+        "cost": weighted_cost / total_weight,
+        "confidence": confidence,
+        "neighbors_used": len(neighbors),
+    }
+
+
+def predict_with_ai_or_fallback(training_reports, loc, cost_per_dev, model, eaf=None, scale_factors_sum=None):
+    input_vector = build_ai_feature_vector(
+        loc=loc,
+        cost_per_dev=cost_per_dev,
+        model=model,
+        eaf=eaf if eaf is not None else 1.0,
+        scale_factors_sum=scale_factors_sum if scale_factors_sum is not None else 15.0,
+    )
+
+    ai_estimate = ai_predict_from_history(training_reports, input_vector)
+    if ai_estimate and len(training_reports) >= 3:
+        ai_estimate["source"] = "history-trained kNN"
+        return ai_estimate
+
+    # Fallback baseline when history is not enough for meaningful training
+    if model == "COCOMO_I":
+        fallback = estimate_with_cocomo_i(loc, cost_per_dev, "organic")
+    else:
+        sf_each = (scale_factors_sum if scale_factors_sum is not None else 15.0) / 5.0
+        fallback = estimate_with_cocomo_ii(
+            loc,
+            cost_per_dev,
+            eaf if eaf is not None else 1.0,
+            {
+                "prec": sf_each,
+                "flex": sf_each,
+                "resl": sf_each,
+                "team": sf_each,
+                "pmat": sf_each,
+            },
+        )
+
+    return {
+        "effort": fallback["effort"],
+        "time": fallback["time"],
+        "cost": fallback["cost"],
+        "confidence": 55.0,
+        "neighbors_used": len(training_reports),
+        "source": "fallback-model",
+    }
 
 @app.route("/")
 def home():
@@ -265,34 +508,97 @@ def dashboard():
 
     result = None
     error = None
+    ai_result = None
+    ai_error = None
 
     if request.method == "POST":
         try:
-            loc = float(request.form["loc"])
-            cost_per_dev = float(request.form["cost"])
+            action = request.form.get("action", "estimate")
 
-            # Validation (NFR-01 Accuracy + NFR-04 Scalability)
-            if loc <= 0 or cost_per_dev <= 0:
-                error = "Please enter valid positive numbers."
-            else:
-                kloc = loc / 1000  # Convert LOC to KLOC
+            if action == "ai_predict":
+                ai_loc = parse_positive_number("AI Project size (LOC)", request.form.get("ai_loc"))
+                ai_cost_per_dev = parse_positive_number("AI Cost per developer", request.form.get("ai_cost"))
+                ai_model = request.form.get("ai_model", "COCOMO_I").strip().upper()
 
-                # Basic COCOMO (Organic Mode)
-                a = 2.4
-                b = 1.05
+                ai_eaf = None
+                ai_scale_factors_sum = None
+                if ai_model == "COCOMO_II":
+                    ai_eaf = parse_positive_number("AI EAF", request.form.get("ai_eaf"), min_value=0, max_value=10)
+                    ai_scale_factors_sum = parse_bounded_number("AI Scale Factors Sum", request.form.get("ai_sf_sum"), 0, 30)
+                elif ai_model != "COCOMO_I":
+                    raise ValueError("Please select a valid AI model.")
 
-                effort = a * (kloc ** b)         # FR-04, FR-05
-                time = 2.5 * (effort ** 0.38)   # FR-06, FR-07
-                total_cost = effort * cost_per_dev  # FR-02, FR-03
+                training_reports = get_all_reports() if is_admin else get_reports_for_user(user_id)
+                predicted = predict_with_ai_or_fallback(
+                    training_reports,
+                    loc=ai_loc,
+                    cost_per_dev=ai_cost_per_dev,
+                    model=ai_model,
+                    eaf=ai_eaf,
+                    scale_factors_sum=ai_scale_factors_sum,
+                )
+
+                ai_result = {
+                    "model": ai_model,
+                    "loc": round(ai_loc, 2),
+                    "cost_per_dev": round(ai_cost_per_dev, 2),
+                    "eaf": round(ai_eaf, 3) if ai_eaf is not None else None,
+                    "scale_factors_sum": round(ai_scale_factors_sum, 3) if ai_scale_factors_sum is not None else None,
+                    "effort": round(predicted["effort"], 2),
+                    "time": round(predicted["time"], 2),
+                    "cost": round(predicted["cost"], 2),
+                    "confidence": round(predicted["confidence"], 1),
+                    "neighbors_used": predicted["neighbors_used"],
+                    "source": predicted["source"],
+                }
+
+            elif action == "estimate":
+                loc = parse_positive_number("Project size (LOC)", request.form.get("loc"))
+                cost_per_dev = parse_positive_number("Cost per developer", request.form.get("cost"))
+                model = request.form.get("model", "COCOMO_I").strip().upper()
+
+                estimate_data = None
+                if model == "COCOMO_I":
+                    cocomo_mode = request.form.get("cocomo_mode", "organic").strip().lower()
+                    estimate_data = estimate_with_cocomo_i(loc, cost_per_dev, cocomo_mode)
+                elif model == "COCOMO_II":
+                    eaf = parse_positive_number("Effort Adjustment Factor (EAF)", request.form.get("eaf"), min_value=0, max_value=10)
+                    scale_factors = {
+                        "prec": parse_bounded_number("PREC", request.form.get("prec"), 0, 6),
+                        "flex": parse_bounded_number("FLEX", request.form.get("flex"), 0, 6),
+                        "resl": parse_bounded_number("RESL", request.form.get("resl"), 0, 6),
+                        "team": parse_bounded_number("TEAM", request.form.get("team"), 0, 6),
+                        "pmat": parse_bounded_number("PMAT", request.form.get("pmat"), 0, 6),
+                    }
+                    estimate_data = estimate_with_cocomo_ii(loc, cost_per_dev, eaf, scale_factors)
+                else:
+                    raise ValueError("Please select a valid estimation model.")
 
                 created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 conn = get_db_connection()
                 cursor = conn.execute(
                     """
-                    INSERT INTO reports (user_id, created_at, effort, time, cost)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO reports (
+                        user_id, created_at, model, loc, cost_per_dev, cocomo_mode,
+                        eaf, scale_factors_sum, productivity, avg_team_size, effort, time, cost
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (user_id, created_at, round(effort, 2), round(time, 2), round(total_cost, 2))
+                    (
+                        user_id,
+                        created_at,
+                        model,
+                        round(loc, 2),
+                        round(cost_per_dev, 2),
+                        estimate_data["cocomo_mode"],
+                        round(estimate_data["eaf"], 3) if estimate_data["eaf"] is not None else None,
+                        round(estimate_data["scale_factors_sum"], 3) if estimate_data["scale_factors_sum"] is not None else None,
+                        round(estimate_data["productivity"], 2),
+                        round(estimate_data["avg_team_size"], 2),
+                        round(estimate_data["effort"], 2),
+                        round(estimate_data["time"], 2),
+                        round(estimate_data["cost"], 2),
+                    )
                 )
                 conn.commit()
                 report_id = cursor.lastrowid
@@ -301,13 +607,26 @@ def dashboard():
                 result = {
                     "id": report_id,
                     "created_at": created_at,
-                    "effort": round(effort, 2),
-                    "time": round(time, 2),
-                    "cost": round(total_cost, 2)
+                    "model": model,
+                    "loc": round(loc, 2),
+                    "cost_per_dev": round(cost_per_dev, 2),
+                    "cocomo_mode": estimate_data["cocomo_mode"],
+                    "eaf": round(estimate_data["eaf"], 3) if estimate_data["eaf"] is not None else None,
+                    "scale_factors_sum": round(estimate_data["scale_factors_sum"], 3) if estimate_data["scale_factors_sum"] is not None else None,
+                    "effort": round(estimate_data["effort"], 2),
+                    "time": round(estimate_data["time"], 2),
+                    "cost": round(estimate_data["cost"], 2),
+                    "avg_team_size": round(estimate_data["avg_team_size"], 2),
+                    "productivity": round(estimate_data["productivity"], 2),
                 }
+            else:
+                raise ValueError("Invalid action requested.")
 
-        except ValueError:
-            error = "Invalid input. Please enter numeric values only."
+        except ValueError as exc:
+            if request.form.get("action") == "ai_predict":
+                ai_error = str(exc)
+            else:
+                error = str(exc)
 
     report_history = get_all_reports() if is_admin else get_reports_for_user(user_id)
     users_list = get_all_users() if is_admin else []
@@ -316,6 +635,8 @@ def dashboard():
         "index.html",
         result=result,
         error=error,
+        ai_result=ai_result,
+        ai_error=ai_error,
         user=username,
         report_history=report_history,
         is_admin=is_admin,
@@ -407,8 +728,16 @@ def download_report(report_id=None):
         f"User: {username}\n"
         f"Report ID: {report['id']}\n"
         f"Generated On: {report['created_at']}\n"
+        f"Model: {report.get('model') or 'COCOMO_I'}\n"
+        f"Project Size (LOC): {report.get('loc') if report.get('loc') is not None else 'N/A'}\n"
+        f"Cost per Developer: {report.get('cost_per_dev') if report.get('cost_per_dev') is not None else 'N/A'}\n"
+        f"COCOMO I Mode: {report.get('cocomo_mode') if report.get('cocomo_mode') else 'N/A'}\n"
+        f"EAF: {report.get('eaf') if report.get('eaf') is not None else 'N/A'}\n"
+        f"Scale Factors Sum: {report.get('scale_factors_sum') if report.get('scale_factors_sum') is not None else 'N/A'}\n"
         f"Effort: {report['effort']} Person/Months\n"
         f"Development Time: {report['time']} Months\n"
+        f"Average Team Size: {report.get('avg_team_size') if report.get('avg_team_size') is not None else 'N/A'}\n"
+        f"Productivity: {report.get('productivity') if report.get('productivity') is not None else 'N/A'} LOC per Person-Month\n"
         f"Total Cost: ₹ {report['cost']}\n"
     )
 
@@ -449,8 +778,16 @@ def download_report_pdf(report_id):
         f"User: {username}",
         f"Report ID: {report['id']}",
         f"Generated On: {report['created_at']}",
+        f"Model: {report.get('model') or 'COCOMO_I'}",
+        f"Project Size (LOC): {report.get('loc') if report.get('loc') is not None else 'N/A'}",
+        f"Cost per Developer: {report.get('cost_per_dev') if report.get('cost_per_dev') is not None else 'N/A'}",
+        f"COCOMO I Mode: {report.get('cocomo_mode') if report.get('cocomo_mode') else 'N/A'}",
+        f"EAF: {report.get('eaf') if report.get('eaf') is not None else 'N/A'}",
+        f"Scale Factors Sum: {report.get('scale_factors_sum') if report.get('scale_factors_sum') is not None else 'N/A'}",
         f"Effort: {report['effort']} Person/Months",
         f"Development Time: {report['time']} Months",
+        f"Average Team Size: {report.get('avg_team_size') if report.get('avg_team_size') is not None else 'N/A'}",
+        f"Productivity: {report.get('productivity') if report.get('productivity') is not None else 'N/A'} LOC/PM",
         f"Total Cost: INR {report['cost']}"
     ]
 

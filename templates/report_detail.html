@@ -101,8 +101,16 @@
 
         <div class="row"><b>Owner</b> {{ report.username }}</div>
         <div class="row"><b>Generated On</b> {{ report.created_at }}</div>
+        <div class="row"><b>Model</b> {{ report.model or "COCOMO_I" }}</div>
+        <div class="row"><b>Project Size</b> {{ report.loc if report.loc is not none else "N/A" }} LOC</div>
+        <div class="row"><b>Cost per Developer</b> ₹ {{ report.cost_per_dev if report.cost_per_dev is not none else "N/A" }}</div>
+        <div class="row"><b>COCOMO I Mode</b> {{ report.cocomo_mode if report.cocomo_mode else "N/A" }}</div>
+        <div class="row"><b>EAF</b> {{ report.eaf if report.eaf is not none else "N/A" }}</div>
+        <div class="row"><b>Scale Factors Sum</b> {{ report.scale_factors_sum if report.scale_factors_sum is not none else "N/A" }}</div>
         <div class="row"><b>Effort</b> {{ report.effort }} Person/Months</div>
         <div class="row"><b>Development Time</b> {{ report.time }} Months</div>
+        <div class="row"><b>Average Team Size</b> {{ report.avg_team_size if report.avg_team_size is not none else "N/A" }}</div>
+        <div class="row"><b>Productivity</b> {{ report.productivity if report.productivity is not none else "N/A" }} LOC/PM</div>
         <div class="row"><b>Total Cost</b> ₹ {{ report.cost }}</div>
 
         <div class="actions">

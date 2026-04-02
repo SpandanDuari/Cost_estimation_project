@@ -62,6 +62,21 @@
             box-sizing: border-box;
             border-radius: 8px;
         }
+        select {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            font-size: 15px;
+            box-sizing: border-box;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            outline: none;
+            background: #ffffff;
+        }
+        select:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
         input {
             border: 1px solid #cbd5e1;
             outline: none;
@@ -212,6 +227,20 @@
             padding: 14px;
             margin-top: 10px;
         }
+        .model-section {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+        }
+        .ai-result {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            padding: 12px;
+            margin-top: 12px;
+            border-radius: 8px;
+        }
         @media (max-width: 900px) {
             .layout {
                 grid-template-columns: 1fr;
@@ -246,12 +275,50 @@
             <h2>Generate New Estimate</h2>
             <form method="POST">
                 <label>Project Size (Lines of Code - LOC)</label>
-                <input type="number" name="loc" placeholder="Eg: 10000" required>
+                <input type="number" name="loc" min="1" step="1" placeholder="Eg: 10000" required>
                 <div class="hint">Enter total number of lines of code</div>
 
                 <label>Cost per Developer (₹ per month)</label>
-                <input type="number" name="cost" placeholder="Eg: 20000" required>
+                <input type="number" name="cost" min="1" step="0.01" placeholder="Eg: 20000" required>
                 <div class="hint">Monthly cost of one developer</div>
+
+                <label>Estimation Model</label>
+                <select name="model" id="modelSelect" required onchange="toggleModelInputs()">
+                    <option value="COCOMO_I" selected>COCOMO I (Basic)</option>
+                    <option value="COCOMO_II">COCOMO II (Post-Architecture)</option>
+                </select>
+
+                <div id="cocomo1Section" class="model-section">
+                    <label>COCOMO I Mode</label>
+                    <select name="cocomo_mode">
+                        <option value="organic" selected>Organic</option>
+                        <option value="semi-detached">Semi-detached</option>
+                        <option value="embedded">Embedded</option>
+                    </select>
+                    <div class="hint">Project type for COCOMO I coefficients.</div>
+                </div>
+
+                <div id="cocomo2Section" class="model-section" style="display: none;">
+                    <label>Effort Adjustment Factor (EAF)</label>
+                    <input type="number" name="eaf" step="0.001" min="0.001" max="10" placeholder="Eg: 1.00" value="1.0">
+                    <div class="hint">Typical default is 1.0. Valid range: 0.001 to 10.</div>
+
+                    <label>PREC (0 to 6)</label>
+                    <input type="number" name="prec" step="0.01" min="0" max="6" placeholder="Eg: 3.72" value="3.0">
+
+                    <label>FLEX (0 to 6)</label>
+                    <input type="number" name="flex" step="0.01" min="0" max="6" placeholder="Eg: 3.04" value="3.0">
+
+                    <label>RESL (0 to 6)</label>
+                    <input type="number" name="resl" step="0.01" min="0" max="6" placeholder="Eg: 4.24" value="3.0">
+
+                    <label>TEAM (0 to 6)</label>
+                    <input type="number" name="team" step="0.01" min="0" max="6" placeholder="Eg: 3.29" value="3.0">
+
+                    <label>PMAT (0 to 6)</label>
+                    <input type="number" name="pmat" step="0.01" min="0" max="6" placeholder="Eg: 4.68" value="3.0">
+                    <div class="hint">COCOMO II scale factors used to compute exponent $E$.</div>
+                </div>
 
                 <button type="submit">Estimate Cost</button>
             </form>
@@ -264,8 +331,20 @@
             <div class="result">
                 <p><b>Latest Report ID:</b> #{{ result.id }}</p>
                 <p><b>Generated On:</b> {{ result.created_at }}</p>
+                <p><b>Model:</b> {{ result.model }}</p>
+                <p><b>Project Size:</b> {{ result.loc }} LOC</p>
+                <p><b>Cost per Developer:</b> ₹ {{ result.cost_per_dev }}</p>
+                {% if result.model == "COCOMO_I" and result.cocomo_mode %}
+                <p><b>COCOMO I Mode:</b> {{ result.cocomo_mode }}</p>
+                {% endif %}
+                {% if result.model == "COCOMO_II" %}
+                <p><b>EAF:</b> {{ result.eaf }}</p>
+                <p><b>Scale Factors Sum:</b> {{ result.scale_factors_sum }}</p>
+                {% endif %}
                 <p><b>Effort:</b> {{ result.effort }} Person/Months</p>
                 <p><b>Development Time:</b> {{ result.time }} Months</p>
+                <p><b>Average Team Size:</b> {{ result.avg_team_size }} Persons</p>
+                <p><b>Productivity:</b> {{ result.productivity }} LOC / Person-Month</p>
                 <p><b>Total Cost:</b> ₹ {{ result.cost }}</p>
                 <div class="actions-inline">
                     <a class="small-btn" href="{{ url_for('download_page') }}">Open in Downloads</a>
@@ -273,6 +352,56 @@
                         <button type="submit" class="small-btn delete">Delete</button>
                     </form>
                 </div>
+            </div>
+            {% endif %}
+
+            <h2 style="margin-top: 22px;">AI-Assisted Cost Prediction</h2>
+            <form method="POST">
+                <input type="hidden" name="action" value="ai_predict">
+
+                <label>Project Size (LOC)</label>
+                <input type="number" name="ai_loc" min="1" step="1" placeholder="Eg: 12000" required>
+
+                <label>Cost per Developer (₹ per month)</label>
+                <input type="number" name="ai_cost" min="1" step="0.01" placeholder="Eg: 22000" required>
+
+                <label>AI Model Context</label>
+                <select name="ai_model" id="aiModelSelect" required onchange="toggleAIModelInputs()">
+                    <option value="COCOMO_I" selected>COCOMO I style project</option>
+                    <option value="COCOMO_II">COCOMO II style project</option>
+                </select>
+
+                <div id="aiCocomo2Section" class="model-section" style="display:none;">
+                    <label>AI EAF</label>
+                    <input type="number" name="ai_eaf" step="0.001" min="0.001" max="10" placeholder="Eg: 1.0" value="1.0">
+
+                    <label>AI Scale Factors Sum (0 to 30)</label>
+                    <input type="number" name="ai_sf_sum" step="0.01" min="0" max="30" placeholder="Eg: 15" value="15">
+                    <div class="hint">Use total of PREC+FLEX+RESL+TEAM+PMAT for context.</div>
+                </div>
+
+                <button type="submit">Predict using AI</button>
+            </form>
+
+            {% if ai_error %}
+            <div class="error">{{ ai_error }}</div>
+            {% endif %}
+
+            {% if ai_result %}
+            <div class="ai-result">
+                <p><b>Prediction Source:</b> {{ ai_result.source }}</p>
+                <p><b>Model Context:</b> {{ ai_result.model }}</p>
+                <p><b>Project Size:</b> {{ ai_result.loc }} LOC</p>
+                <p><b>Cost per Developer:</b> ₹ {{ ai_result.cost_per_dev }}</p>
+                {% if ai_result.model == "COCOMO_II" %}
+                <p><b>EAF:</b> {{ ai_result.eaf }}</p>
+                <p><b>Scale Factors Sum:</b> {{ ai_result.scale_factors_sum }}</p>
+                {% endif %}
+                <p><b>Predicted Effort:</b> {{ ai_result.effort }} Person/Months</p>
+                <p><b>Predicted Development Time:</b> {{ ai_result.time }} Months</p>
+                <p><b>Predicted Cost:</b> ₹ {{ ai_result.cost }}</p>
+                <p><b>Confidence:</b> {{ ai_result.confidence }}%</p>
+                <p><b>Historical Samples Used:</b> {{ ai_result.neighbors_used }}</p>
             </div>
             {% endif %}
         </div>
@@ -350,6 +479,36 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+    function toggleModelInputs() {
+        const model = document.getElementById('modelSelect').value;
+        const cocomo1Section = document.getElementById('cocomo1Section');
+        const cocomo2Section = document.getElementById('cocomo2Section');
+
+        if (model === 'COCOMO_II') {
+            cocomo1Section.style.display = 'none';
+            cocomo2Section.style.display = 'block';
+        } else {
+            cocomo1Section.style.display = 'block';
+            cocomo2Section.style.display = 'none';
+        }
+    }
+
+    function toggleAIModelInputs() {
+        const aiModel = document.getElementById('aiModelSelect').value;
+        const aiCocomo2Section = document.getElementById('aiCocomo2Section');
+
+        if (aiModel === 'COCOMO_II') {
+            aiCocomo2Section.style.display = 'block';
+        } else {
+            aiCocomo2Section.style.display = 'none';
+        }
+    }
+
+    toggleModelInputs();
+    toggleAIModelInputs();
+</script>
 
 </body>
 </html>
