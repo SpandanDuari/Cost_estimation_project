@@ -255,6 +255,63 @@ def parse_bounded_number(field_name, raw_value, min_value, max_value):
     return value
 
 
+def clamp(value, min_value, max_value):
+    return max(min_value, min(max_value, value))
+
+
+def determine_cocomo_strategy(loc, complexity, reliability, constraints, team_experience, schedule_pressure):
+    # Composite complexity score used for both model and mode selection.
+    score = (
+        0.30 * complexity
+        + 0.25 * reliability
+        + 0.20 * constraints
+        + 0.15 * schedule_pressure
+        + 0.10 * (10 - team_experience)
+    )
+
+    if loc >= 300000 or score >= 7.5:
+        cocomo_mode = "embedded"
+    elif loc >= 50000 or score >= 5.0:
+        cocomo_mode = "semi-detached"
+    else:
+        cocomo_mode = "organic"
+
+    # COCOMO II is chosen for truly extreme/high-risk projects.
+    # This keeps COCOMO I Embedded reachable for advanced-but-not-extreme systems.
+    extreme_size = loc >= 500000
+    extreme_composite_risk = score >= 8.8
+    extreme_reliability_constraints = reliability >= 9 and constraints >= 9
+    extreme_schedule_complexity = schedule_pressure >= 9 and complexity >= 9
+
+    use_cocomo_ii = (
+        extreme_size
+        or extreme_composite_risk
+        or extreme_reliability_constraints
+        or extreme_schedule_complexity
+    )
+    model = "COCOMO_II" if use_cocomo_ii else "COCOMO_I"
+
+    # Derive EAF and scale factors from the same fixed inputs.
+    eaf = 0.85 + (0.03 * complexity) + (0.025 * reliability) + (0.02 * constraints) + (0.015 * schedule_pressure) - (0.025 * team_experience)
+    eaf = clamp(eaf, 0.70, 1.40)
+
+    scale_factors = {
+        "prec": clamp((team_experience / 10.0) * 6.0, 0.0, 6.0),
+        "flex": clamp(((10.0 - schedule_pressure) / 10.0) * 6.0, 0.0, 6.0),
+        "resl": clamp(((team_experience + (10.0 - complexity)) / 20.0) * 6.0, 0.0, 6.0),
+        "team": clamp((team_experience / 10.0) * 6.0, 0.0, 6.0),
+        "pmat": clamp(((team_experience + (10.0 - constraints)) / 20.0) * 6.0, 0.0, 6.0),
+    }
+
+    return {
+        "model": model,
+        "cocomo_mode": cocomo_mode,
+        "score": score,
+        "eaf": eaf,
+        "scale_factors": scale_factors,
+    }
+
+
 def estimate_with_cocomo_i(loc, cost_per_dev, cocomo_mode):
     coefficients = COCOMO_I_COEFFICIENTS.get(cocomo_mode)
     if not coefficients:
@@ -434,6 +491,55 @@ def predict_with_ai_or_fallback(training_reports, loc, cost_per_dev, model, eaf=
         "source": "fallback-model",
     }
 
+
+def calibrate_estimate_with_ai(base_estimate, training_reports, loc, cost_per_dev, model, eaf=None, scale_factors_sum=None):
+    """
+    Blend rule-based COCOMO output with history-based AI prediction.
+    Uses dynamic blending so historical data improves accuracy without overriding domain model behavior.
+    """
+    ai_output = predict_with_ai_or_fallback(
+        training_reports,
+        loc=loc,
+        cost_per_dev=cost_per_dev,
+        model=model,
+        eaf=eaf,
+        scale_factors_sum=scale_factors_sum,
+    )
+
+    if ai_output["source"] != "history-trained kNN":
+        return {
+            **base_estimate,
+            "ai_applied": False,
+            "ai_confidence": ai_output["confidence"],
+            "ai_neighbors_used": ai_output["neighbors_used"],
+            "ai_source": ai_output["source"],
+        }
+
+    # More confidence and more neighbors => slightly stronger correction.
+    confidence_factor = max(0.0, (ai_output["confidence"] - 50.0) / 50.0)  # 0..1
+    neighbor_factor = min(1.0, ai_output["neighbors_used"] / 5.0)           # 0..1
+    ai_weight = min(0.40, 0.10 + 0.30 * confidence_factor * neighbor_factor)
+
+    calibrated_effort = (1 - ai_weight) * base_estimate["effort"] + ai_weight * ai_output["effort"]
+    calibrated_time = (1 - ai_weight) * base_estimate["time"] + ai_weight * ai_output["time"]
+    calibrated_cost = (1 - ai_weight) * base_estimate["cost"] + ai_weight * ai_output["cost"]
+    calibrated_avg_team_size = calibrated_effort / calibrated_time if calibrated_time > 0 else base_estimate["avg_team_size"]
+    calibrated_productivity = loc / calibrated_effort if calibrated_effort > 0 else base_estimate["productivity"]
+
+    return {
+        **base_estimate,
+        "effort": calibrated_effort,
+        "time": calibrated_time,
+        "cost": calibrated_cost,
+        "avg_team_size": calibrated_avg_team_size,
+        "productivity": calibrated_productivity,
+        "ai_applied": True,
+        "ai_weight": ai_weight,
+        "ai_confidence": ai_output["confidence"],
+        "ai_neighbors_used": ai_output["neighbors_used"],
+        "ai_source": ai_output["source"],
+    }
+
 @app.route("/")
 def home():
     if session.get("user"):
@@ -508,125 +614,104 @@ def dashboard():
 
     result = None
     error = None
-    ai_result = None
-    ai_error = None
 
     if request.method == "POST":
         try:
-            action = request.form.get("action", "estimate")
+            loc = parse_positive_number("Project size (LOC)", request.form.get("loc"))
+            cost_per_dev = parse_positive_number("Cost per developer", request.form.get("cost"))
+            complexity = parse_bounded_number("Complexity", request.form.get("complexity"), 1, 10)
+            reliability = parse_bounded_number("Reliability Requirement", request.form.get("reliability"), 1, 10)
+            constraints = parse_bounded_number("Platform Constraints", request.form.get("constraints"), 1, 10)
+            team_experience = parse_bounded_number("Team Experience", request.form.get("team_experience"), 1, 10)
+            schedule_pressure = parse_bounded_number("Schedule Pressure", request.form.get("schedule_pressure"), 1, 10)
 
-            if action == "ai_predict":
-                ai_loc = parse_positive_number("AI Project size (LOC)", request.form.get("ai_loc"))
-                ai_cost_per_dev = parse_positive_number("AI Cost per developer", request.form.get("ai_cost"))
-                ai_model = request.form.get("ai_model", "COCOMO_I").strip().upper()
+            strategy = determine_cocomo_strategy(
+                loc=loc,
+                complexity=complexity,
+                reliability=reliability,
+                constraints=constraints,
+                team_experience=team_experience,
+                schedule_pressure=schedule_pressure,
+            )
+            model = strategy["model"]
 
-                ai_eaf = None
-                ai_scale_factors_sum = None
-                if ai_model == "COCOMO_II":
-                    ai_eaf = parse_positive_number("AI EAF", request.form.get("ai_eaf"), min_value=0, max_value=10)
-                    ai_scale_factors_sum = parse_bounded_number("AI Scale Factors Sum", request.form.get("ai_sf_sum"), 0, 30)
-                elif ai_model != "COCOMO_I":
-                    raise ValueError("Please select a valid AI model.")
-
-                training_reports = get_all_reports() if is_admin else get_reports_for_user(user_id)
-                predicted = predict_with_ai_or_fallback(
-                    training_reports,
-                    loc=ai_loc,
-                    cost_per_dev=ai_cost_per_dev,
-                    model=ai_model,
-                    eaf=ai_eaf,
-                    scale_factors_sum=ai_scale_factors_sum,
-                )
-
-                ai_result = {
-                    "model": ai_model,
-                    "loc": round(ai_loc, 2),
-                    "cost_per_dev": round(ai_cost_per_dev, 2),
-                    "eaf": round(ai_eaf, 3) if ai_eaf is not None else None,
-                    "scale_factors_sum": round(ai_scale_factors_sum, 3) if ai_scale_factors_sum is not None else None,
-                    "effort": round(predicted["effort"], 2),
-                    "time": round(predicted["time"], 2),
-                    "cost": round(predicted["cost"], 2),
-                    "confidence": round(predicted["confidence"], 1),
-                    "neighbors_used": predicted["neighbors_used"],
-                    "source": predicted["source"],
-                }
-
-            elif action == "estimate":
-                loc = parse_positive_number("Project size (LOC)", request.form.get("loc"))
-                cost_per_dev = parse_positive_number("Cost per developer", request.form.get("cost"))
-                model = request.form.get("model", "COCOMO_I").strip().upper()
-
-                estimate_data = None
-                if model == "COCOMO_I":
-                    cocomo_mode = request.form.get("cocomo_mode", "organic").strip().lower()
-                    estimate_data = estimate_with_cocomo_i(loc, cost_per_dev, cocomo_mode)
-                elif model == "COCOMO_II":
-                    eaf = parse_positive_number("Effort Adjustment Factor (EAF)", request.form.get("eaf"), min_value=0, max_value=10)
-                    scale_factors = {
-                        "prec": parse_bounded_number("PREC", request.form.get("prec"), 0, 6),
-                        "flex": parse_bounded_number("FLEX", request.form.get("flex"), 0, 6),
-                        "resl": parse_bounded_number("RESL", request.form.get("resl"), 0, 6),
-                        "team": parse_bounded_number("TEAM", request.form.get("team"), 0, 6),
-                        "pmat": parse_bounded_number("PMAT", request.form.get("pmat"), 0, 6),
-                    }
-                    estimate_data = estimate_with_cocomo_ii(loc, cost_per_dev, eaf, scale_factors)
-                else:
-                    raise ValueError("Please select a valid estimation model.")
-
-                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                conn = get_db_connection()
-                cursor = conn.execute(
-                    """
-                    INSERT INTO reports (
-                        user_id, created_at, model, loc, cost_per_dev, cocomo_mode,
-                        eaf, scale_factors_sum, productivity, avg_team_size, effort, time, cost
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        user_id,
-                        created_at,
-                        model,
-                        round(loc, 2),
-                        round(cost_per_dev, 2),
-                        estimate_data["cocomo_mode"],
-                        round(estimate_data["eaf"], 3) if estimate_data["eaf"] is not None else None,
-                        round(estimate_data["scale_factors_sum"], 3) if estimate_data["scale_factors_sum"] is not None else None,
-                        round(estimate_data["productivity"], 2),
-                        round(estimate_data["avg_team_size"], 2),
-                        round(estimate_data["effort"], 2),
-                        round(estimate_data["time"], 2),
-                        round(estimate_data["cost"], 2),
-                    )
-                )
-                conn.commit()
-                report_id = cursor.lastrowid
-                conn.close()
-
-                result = {
-                    "id": report_id,
-                    "created_at": created_at,
-                    "model": model,
-                    "loc": round(loc, 2),
-                    "cost_per_dev": round(cost_per_dev, 2),
-                    "cocomo_mode": estimate_data["cocomo_mode"],
-                    "eaf": round(estimate_data["eaf"], 3) if estimate_data["eaf"] is not None else None,
-                    "scale_factors_sum": round(estimate_data["scale_factors_sum"], 3) if estimate_data["scale_factors_sum"] is not None else None,
-                    "effort": round(estimate_data["effort"], 2),
-                    "time": round(estimate_data["time"], 2),
-                    "cost": round(estimate_data["cost"], 2),
-                    "avg_team_size": round(estimate_data["avg_team_size"], 2),
-                    "productivity": round(estimate_data["productivity"], 2),
-                }
+            if model == "COCOMO_I":
+                estimate_data = estimate_with_cocomo_i(loc, cost_per_dev, strategy["cocomo_mode"])
             else:
-                raise ValueError("Invalid action requested.")
+                estimate_data = estimate_with_cocomo_ii(loc, cost_per_dev, strategy["eaf"], strategy["scale_factors"])
+                estimate_data["cocomo_mode"] = None
+
+            training_reports = get_all_reports() if is_admin else get_reports_for_user(user_id)
+            calibrated_data = calibrate_estimate_with_ai(
+                estimate_data,
+                training_reports=training_reports,
+                loc=loc,
+                cost_per_dev=cost_per_dev,
+                model=model,
+                eaf=estimate_data.get("eaf"),
+                scale_factors_sum=estimate_data.get("scale_factors_sum"),
+            )
+
+            created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn = get_db_connection()
+            cursor = conn.execute(
+                """
+                INSERT INTO reports (
+                    user_id, created_at, model, loc, cost_per_dev, cocomo_mode,
+                    eaf, scale_factors_sum, productivity, avg_team_size, effort, time, cost
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    created_at,
+                    model,
+                    round(loc, 2),
+                    round(cost_per_dev, 2),
+                    calibrated_data["cocomo_mode"],
+                    round(calibrated_data["eaf"], 3) if calibrated_data["eaf"] is not None else None,
+                    round(calibrated_data["scale_factors_sum"], 3) if calibrated_data["scale_factors_sum"] is not None else None,
+                    round(calibrated_data["productivity"], 2),
+                    round(calibrated_data["avg_team_size"], 2),
+                    round(calibrated_data["effort"], 2),
+                    round(calibrated_data["time"], 2),
+                    round(calibrated_data["cost"], 2),
+                )
+            )
+            conn.commit()
+            report_id = cursor.lastrowid
+            conn.close()
+
+            result = {
+                "id": report_id,
+                "created_at": created_at,
+                "model": model,
+                "loc": round(loc, 2),
+                "cost_per_dev": round(cost_per_dev, 2),
+                "cocomo_mode": calibrated_data["cocomo_mode"],
+                "cocomo_ii_submodel": "Post-Architecture" if model == "COCOMO_II" else None,
+                "eaf": round(calibrated_data["eaf"], 3) if calibrated_data["eaf"] is not None else None,
+                "scale_factors_sum": round(calibrated_data["scale_factors_sum"], 3) if calibrated_data["scale_factors_sum"] is not None else None,
+                "selection_score": round(strategy["score"], 2),
+                "complexity": round(complexity, 1),
+                "reliability": round(reliability, 1),
+                "constraints": round(constraints, 1),
+                "team_experience": round(team_experience, 1),
+                "schedule_pressure": round(schedule_pressure, 1),
+                "effort": round(calibrated_data["effort"], 2),
+                "time": round(calibrated_data["time"], 2),
+                "cost": round(calibrated_data["cost"], 2),
+                "avg_team_size": round(calibrated_data["avg_team_size"], 2),
+                "productivity": round(calibrated_data["productivity"], 2),
+                "ai_applied": calibrated_data["ai_applied"],
+                "ai_confidence": round(calibrated_data["ai_confidence"], 1),
+                "ai_neighbors_used": calibrated_data["ai_neighbors_used"],
+                "ai_source": calibrated_data["ai_source"],
+                "ai_weight": round(calibrated_data.get("ai_weight", 0) * 100, 1),
+            }
 
         except ValueError as exc:
-            if request.form.get("action") == "ai_predict":
-                ai_error = str(exc)
-            else:
-                error = str(exc)
+            error = str(exc)
 
     report_history = get_all_reports() if is_admin else get_reports_for_user(user_id)
     users_list = get_all_users() if is_admin else []
@@ -635,8 +720,6 @@ def dashboard():
         "index.html",
         result=result,
         error=error,
-        ai_result=ai_result,
-        ai_error=ai_error,
         user=username,
         report_history=report_history,
         is_admin=is_admin,
@@ -729,9 +812,10 @@ def download_report(report_id=None):
         f"Report ID: {report['id']}\n"
         f"Generated On: {report['created_at']}\n"
         f"Model: {report.get('model') or 'COCOMO_I'}\n"
+        f"COCOMO II Submodel: {'Post-Architecture' if (report.get('model') or 'COCOMO_I') == 'COCOMO_II' else 'N/A'}\n"
         f"Project Size (LOC): {report.get('loc') if report.get('loc') is not None else 'N/A'}\n"
         f"Cost per Developer: {report.get('cost_per_dev') if report.get('cost_per_dev') is not None else 'N/A'}\n"
-        f"COCOMO I Mode: {report.get('cocomo_mode') if report.get('cocomo_mode') else 'N/A'}\n"
+        f"COCOMO I Mode: {report.get('cocomo_mode') if (report.get('model') or 'COCOMO_I') == 'COCOMO_I' and report.get('cocomo_mode') else 'N/A'}\n"
         f"EAF: {report.get('eaf') if report.get('eaf') is not None else 'N/A'}\n"
         f"Scale Factors Sum: {report.get('scale_factors_sum') if report.get('scale_factors_sum') is not None else 'N/A'}\n"
         f"Effort: {report['effort']} Person/Months\n"
@@ -779,9 +863,10 @@ def download_report_pdf(report_id):
         f"Report ID: {report['id']}",
         f"Generated On: {report['created_at']}",
         f"Model: {report.get('model') or 'COCOMO_I'}",
+        f"COCOMO II Submodel: {'Post-Architecture' if (report.get('model') or 'COCOMO_I') == 'COCOMO_II' else 'N/A'}",
         f"Project Size (LOC): {report.get('loc') if report.get('loc') is not None else 'N/A'}",
         f"Cost per Developer: {report.get('cost_per_dev') if report.get('cost_per_dev') is not None else 'N/A'}",
-        f"COCOMO I Mode: {report.get('cocomo_mode') if report.get('cocomo_mode') else 'N/A'}",
+        f"COCOMO I Mode: {report.get('cocomo_mode') if (report.get('model') or 'COCOMO_I') == 'COCOMO_I' and report.get('cocomo_mode') else 'N/A'}",
         f"EAF: {report.get('eaf') if report.get('eaf') is not None else 'N/A'}",
         f"Scale Factors Sum: {report.get('scale_factors_sum') if report.get('scale_factors_sum') is not None else 'N/A'}",
         f"Effort: {report['effort']} Person/Months",

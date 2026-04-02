@@ -104,7 +104,12 @@
         <div class="row"><b>Model</b> {{ report.model or "COCOMO_I" }}</div>
         <div class="row"><b>Project Size</b> {{ report.loc if report.loc is not none else "N/A" }} LOC</div>
         <div class="row"><b>Cost per Developer</b> ₹ {{ report.cost_per_dev if report.cost_per_dev is not none else "N/A" }}</div>
+        {% if (report.model or "COCOMO_I") == "COCOMO_I" %}
         <div class="row"><b>COCOMO I Mode</b> {{ report.cocomo_mode if report.cocomo_mode else "N/A" }}</div>
+        {% endif %}
+        {% if (report.model or "COCOMO_I") == "COCOMO_II" %}
+        <div class="row"><b>COCOMO II Submodel</b> Post-Architecture</div>
+        {% endif %}
         <div class="row"><b>EAF</b> {{ report.eaf if report.eaf is not none else "N/A" }}</div>
         <div class="row"><b>Scale Factors Sum</b> {{ report.scale_factors_sum if report.scale_factors_sum is not none else "N/A" }}</div>
         <div class="row"><b>Effort</b> {{ report.effort }} Person/Months</div>
