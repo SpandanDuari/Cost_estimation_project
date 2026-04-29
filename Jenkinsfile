@@ -34,8 +34,17 @@ pipeline {
                 dir('infra/terraform') {
                     bat '''
                         @echo on
+                        setlocal enabledelayedexpansion
                         terraform init
                         terraform validate
+
+                        rem Import resources if they already exist in AWS but not in state
+                        terraform import aws_ecr_repository.app cost-estimation || echo ECR repository already in state or not found.
+                        terraform import aws_iam_role.eks_cluster_role cost-estimation-eks-cluster-role || echo EKS cluster role already in state or not found.
+                        terraform import aws_iam_role.eks_node_role cost-estimation-eks-node-role || echo EKS node role already in state or not found.
+                        terraform import aws_eks_cluster.main cost-estimation-cluster || echo EKS cluster already in state or not found.
+                        terraform import aws_eks_node_group.main cost-estimation-cluster:cost-estimation-node-group || echo EKS node group already in state or not found.
+
                         if /I "%TERRAFORM_ACTION%"=="plan" (
                             terraform plan -out=tfplan
                         ) else if /I "%TERRAFORM_ACTION%"=="apply" (
