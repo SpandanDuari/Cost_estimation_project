@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from datetime import datetime
 import io
 import math
@@ -7,13 +8,11 @@ from flask import Flask, render_template, request, redirect, url_for, session, R
 from werkzeug.security import generate_password_hash, check_password_hash
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+=======
+from flask import Flask, render_template, request
+>>>>>>> 9990489 (DevOPs changes)
 
 app = Flask(__name__)
-app.secret_key = "cost-estimation-secret-key"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "cost_estimation.db")
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "admin123"
 
 COCOMO_I_COEFFICIENTS = {
     "organic": {"a": 2.4, "b": 1.05},
@@ -25,12 +24,30 @@ COCOMO_II_B = 0.91
 MAX_INPUT_VALUE = 1_000_000_000
 
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def calculate_cost(inputs):
+    effort = float(inputs.get("effort", 0) or 0)
+    team_size = int(inputs.get("team_size", 1) or 1)
+    hours_per_day = float(inputs.get("hours_per_day", 8) or 8)
+    hourly_rate = float(inputs.get("hourly_rate", 25) or 25)
+    days = float(inputs.get("days", 1) or 1)
+
+    time_cost = team_size * hours_per_day * hourly_rate * days
+    effort_factor = effort * 0.35
+    total_cost = time_cost + effort_factor
+
+    return {
+        "effort": round(effort, 2),
+        "team_size": team_size,
+        "hours_per_day": round(hours_per_day, 2),
+        "hourly_rate": round(hourly_rate, 2),
+        "days": round(days, 2),
+        "time_cost": round(time_cost, 2),
+        "effort_factor": round(effort_factor, 2),
+        "total_cost": round(total_cost, 2),
+    }
 
 
+<<<<<<< HEAD
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -541,82 +558,23 @@ def calibrate_estimate_with_ai(base_estimate, training_reports, loc, cost_per_de
     }
 
 @app.route("/")
+=======
+@app.route("/", methods=["GET", "POST"])
+>>>>>>> 9990489 (DevOPs changes)
 def home():
-    if session.get("user"):
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("auth"))
-
-
-@app.route("/auth", methods=["GET", "POST"])
-def auth():
-    error = None
-
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-
-        if not username or not password:
-            error = "Username and password are required."
-        else:
-            user_record = get_user_by_username(username)
-            if user_record and check_password_hash(user_record["password_hash"], password):
-                session["user"] = username
-                return redirect(url_for("dashboard"))
-            error = "Invalid username or password."
-
-    return render_template("login.html", error=error)
-
-
-@app.route("/signup", methods=["GET", "POST"])
-def signup():
-    error = None
-    message = None
-
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-
-        if not username or not password:
-            error = "Username and password are required."
-        elif get_user_by_username(username):
-            error = "Username already exists. Please choose another one."
-        else:
-            password_hash = generate_password_hash(password)
-            conn = get_db_connection()
-            conn.execute(
-                """
-                INSERT INTO users (username, password_hash, is_admin, created_at)
-                VALUES (?, ?, 0, ?)
-                """,
-                (username, password_hash, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
-            conn.commit()
-            conn.close()
-            message = "Account created successfully. Please log in."
-
-    return render_template("signup.html", error=error, message=message)
-
-
-@app.route("/dashboard", methods=["GET", "POST"])
-def dashboard():
-    if not session.get("user"):
-        return redirect(url_for("auth"))
-
-    username = session.get("user")
-    user_record = get_user_by_username(username)
-
-    if not user_record:
-        session.clear()
-        return redirect(url_for("auth"))
-
-    user_id = user_record["id"]
-    is_admin = bool(user_record["is_admin"])
-
+    defaults = {
+        "effort": "20",
+        "team_size": "3",
+        "hours_per_day": "8",
+        "hourly_rate": "25",
+        "days": "10",
+    }
     result = None
     error = None
 
     if request.method == "POST":
         try:
+<<<<<<< HEAD
             loc = parse_positive_number("Project size (LOC)", request.form.get("loc"))
             cost_per_dev = parse_positive_number("Cost per developer", request.form.get("cost"))
             complexity = parse_bounded_number("Complexity", request.form.get("complexity"), 1, 10)
@@ -712,26 +670,30 @@ def dashboard():
 
         except ValueError as exc:
             error = str(exc)
+=======
+            result = calculate_cost(request.form)
+            defaults = {
+                "effort": request.form.get("effort", ""),
+                "team_size": request.form.get("team_size", ""),
+                "hours_per_day": request.form.get("hours_per_day", ""),
+                "hourly_rate": request.form.get("hourly_rate", ""),
+                "days": request.form.get("days", ""),
+            }
+        except ValueError:
+            error = "Please enter valid numeric values in all fields."
+>>>>>>> 9990489 (DevOPs changes)
 
-    report_history = get_all_reports() if is_admin else get_reports_for_user(user_id)
-    users_list = get_all_users() if is_admin else []
-
-    return render_template(
-        "index.html",
-        result=result,
-        error=error,
-        user=username,
-        report_history=report_history,
-        is_admin=is_admin,
-        users_list=users_list
-    )
+    return render_template("index.html", defaults=defaults, result=result, error=error)
 
 
-@app.route("/download")
-def download_page():
-    if not session.get("user"):
-        return redirect(url_for("auth"))
+@app.route("/auth")
+@app.route("/login")
+@app.route("/signup")
+@app.route("/dashboard")
+def legacy_routes():
+    return home()
 
+<<<<<<< HEAD
     username = session.get("user")
     user_record = get_user_by_username(username)
 
@@ -958,6 +920,8 @@ def admin_delete_user(user_id):
 def logout():
     session.clear()
     return redirect(url_for("auth"))
+=======
+>>>>>>> 9990489 (DevOPs changes)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)

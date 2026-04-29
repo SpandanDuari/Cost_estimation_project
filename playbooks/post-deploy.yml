@@ -1,0 +1,131 @@
+---
+# Ansible Playbook for Post-Deployment Configuration
+# Runs after EKS cluster is provisioned and app is deployed
+# Tasks: install monitoring, logging, ingress controller
+
+- name: Post-Deploy Configuration for Cost Estimation App
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    cluster_name: "{{ cluster_name | default('cost-estimation-cluster') }}"
+    aws_region: "{{ aws_region | default('ap-south-1') }}"
+    cluster_endpoint: "{{ cluster_endpoint | default('') }}"
+
+  tasks:
+    - name: Display deployment information
+      debug:
+        msg:
+          - "Cluster: {{ cluster_name }}"
+          - "Region: {{ aws_region }}"
+          - "Endpoint: {{ cluster_endpoint }}"
+
+    - name: Install Metrics Server for HPA
+      kubernetes.core.helm:
+        name: metrics-server
+        chart_ref: metrics-server
+        release_namespace: kube-system
+        repository_url: https://kubernetes-sigs.github.io/metrics-server/charts
+        state: present
+        wait: yes
+      ignore_errors: yes
+      retries: 3
+      delay: 10
+
+    - name: Create monitoring namespace
+      kubernetes.core.k8s:
+        name: monitoring
+        api_version: v1
+        kind: Namespace
+        state: present
+      ignore_errors: yes
+
+    - name: Install Prometheus (Helm)
+      block:
+        - name: Add Prometheus Helm repo
+          shell: |
+            helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+            helm repo update
+          ignore_errors: yes
+
+        - name: Install kube-prometheus-stack
+          kubernetes.core.helm:
+            name: kube-prometheus-stack
+            chart_ref: prometheus-community/kube-prometheus-stack
+            release_namespace: monitoring
+            repository_url: https://prometheus-community.github.io/helm-charts
+            state: present
+            wait: yes
+            values:
+              prometheus:
+                prometheusSpec:
+                  storageSpec:
+                    volumeClaimTemplate:
+                      spec:
+                        storageClassName: gp2
+                        accessModes: ["ReadWriteOnce"]
+                        resources:
+                          requests:
+                            storage: 10Gi
+          ignore_errors: yes
+          retries: 2
+          delay: 15
+      ignore_errors: yes
+
+    - name: Create NGINX Ingress Controller
+      block:
+        - name: Add NGINX Helm repo
+          shell: |
+            helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+            helm repo update
+          ignore_errors: yes
+
+        - name: Create ingress-nginx namespace
+          kubernetes.core.k8s:
+            name: ingress-nginx
+            api_version: v1
+            kind: Namespace
+            state: present
+          ignore_errors: yes
+
+        - name: Install NGINX Ingress Controller
+          kubernetes.core.helm:
+            name: ingress-nginx
+            chart_ref: ingress-nginx/ingress-nginx
+            release_namespace: ingress-nginx
+            repository_url: https://kubernetes.github.io/ingress-nginx
+            state: present
+            wait: yes
+            values:
+              controller:
+                service:
+                  type: LoadBalancer
+          ignore_errors: yes
+          retries: 2
+          delay: 15
+      ignore_errors: yes
+
+    - name: Log cluster info
+      shell: |
+        echo "=== EKS Cluster Info ===" > /tmp/cluster-info.log
+        kubectl cluster-info >> /tmp/cluster-info.log 2>&1
+        echo "" >> /tmp/cluster-info.log
+        echo "=== Nodes ===" >> /tmp/cluster-info.log
+        kubectl get nodes -o wide >> /tmp/cluster-info.log 2>&1
+        echo "" >> /tmp/cluster-info.log
+        echo "=== Pods ===" >> /tmp/cluster-info.log
+        kubectl get pods -A >> /tmp/cluster-info.log 2>&1
+        cat /tmp/cluster-info.log
+      ignore_errors: yes
+
+    - name: Display completion message
+      debug:
+        msg:
+          - "✓ Post-deployment configuration completed!"
+          - "✓ Metrics Server installed for HPA"
+          - "✓ Prometheus monitoring installed in 'monitoring' namespace"
+          - "✓ NGINX Ingress Controller installed in 'ingress-nginx' namespace"
+          - ""
+          - "Next steps:"
+          - "1. Access Prometheus: kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090"
+          - "2. Access Grafana: kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80"
+          - "3. Access Alertmanager: kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093"

@@ -1,0 +1,11 @@
+services:
+  # Flask web application using the existing SQLite database
+  web:
+    build: .
+    container_name: cost-estimation-app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+    volumes:
+      - .:/app

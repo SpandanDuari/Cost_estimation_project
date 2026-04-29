@@ -1,0 +1,29 @@
+---
+# Ansible Inventory for AWS EC2 Plugin
+# Dynamically discovers AWS resources
+
+plugin: aws_ec2
+
+# AWS credentials
+regions:
+  - ap-south-1
+
+keyed_groups:
+  - key: aws_tag_Environment
+    parent_group: tag_Environment
+
+  - key: placement.region
+    parent_group: aws_region
+
+filters:
+  tag:Application: cost-estimation
+  instance-state-name: running
+
+# Set composed variables
+compose:
+  ansible_host: public_ip_address
+
+# SSH connection settings
+hostnames:
+  - dns-name
+  - private-ip-address

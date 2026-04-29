@@ -1,0 +1,7 @@
+# Copy this to terraform.tfvars and update values
+# DO NOT commit terraform.tfvars with real passwords to git!
+
+aws_region          = "ap-south-1"
+project_name        = "cost-estimation"
+environment         = "production"
+eks_cluster_version = "1.28"

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cost-estimation-service
+  namespace: default
+  labels:
+    app: cost-estimation
+
+spec:
+  type: LoadBalancer
+  selector:
+    app: cost-estimation
+  
+  ports:
+  - port: 80
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
