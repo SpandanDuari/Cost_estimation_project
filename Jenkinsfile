@@ -17,6 +17,7 @@ pipeline {
         CLUSTER_NAME = "cost-estimation-cluster"
         TF_VAR_aws_region = "${AWS_REGION}"
         TF_VAR_environment = "production"
+        TF_VAR_eks_cluster_version = "1.30"
     }
 
     stages {
