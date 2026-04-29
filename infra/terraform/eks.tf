@@ -88,6 +88,21 @@ resource "aws_eks_cluster" "main" {
     endpoint_public_access  = true
   }
 
+  # Important: ignore_changes prevents recreation when AWS applies defaults
+  # that differ from Terraform configuration (e.g., bootstrap_self_managed_addons,
+  # access_config). Since we're managing an imported cluster, we ignore
+  # attributes that AWS manages after cluster creation.
+  lifecycle {
+    ignore_changes = [
+      bootstrap_self_managed_addons,
+      access_config,
+      enabled_cluster_log_types,
+      kubernetes_network_config,
+      platform_version,
+      upgrade_policy,
+    ]
+  }
+
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy
   ]
