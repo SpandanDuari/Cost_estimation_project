@@ -93,8 +93,9 @@ pipeline {
                     setlocal enabledelayedexpansion
                     set "ECR_REGISTRY=%AWS_ACCOUNT_ID%.dkr.ecr.%AWS_REGION%.amazonaws.com"
                     set "REPOSITORY_URI=!ECR_REGISTRY!/%IMAGE_REPO_NAME%"
-                    kubectl set image deployment/cost-estimation-app cost-estimation=!REPOSITORY_URI!:%IMAGE_TAG%
+                    kubectl apply -f k8s/deployment.yaml
                     kubectl apply -f k8s/service.yaml
+                    kubectl rollout restart deployment/cost-estimation-app
                     kubectl rollout status deployment/cost-estimation-app --timeout=5m
                     echo Deployment Status:
                     kubectl get pods -l app=cost-estimation -o wide

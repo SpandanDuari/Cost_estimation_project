@@ -22,7 +22,7 @@ spec:
       containers:
       - name: cost-estimation
         image: 974387521388.dkr.ecr.ap-south-1.amazonaws.com/devopsproject:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
 
         ports:
         - containerPort: 5000
