@@ -100,6 +100,7 @@ resource "aws_eks_cluster" "main" {
       kubernetes_network_config,
       platform_version,
       upgrade_policy,
+      version,
     ]
   }
 
@@ -121,6 +122,7 @@ resource "aws_eks_node_group" "main" {
   subnet_ids      = aws_subnet.public[*].id
 
   instance_types = ["t3.small"]
+  ami_type       = "AL2_x86_64"
 
   scaling_config {
     desired_size = 2
